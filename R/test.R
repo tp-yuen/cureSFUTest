@@ -303,3 +303,123 @@ grenander.p.val <- function(gren, a, tau, c.shift = 1, eps = 0.01) {
 
   return(p.val)
 }
+
+#' Testing sufficient follow-up using Smoothed Grenander Estimator \eqn{\hat{f}_{nh}^{SG}}
+#' with undersmoothing
+#'
+#' Testing the hypotheses:
+#' \deqn{
+#'    \tilde{H}_{0}: q_{1 - \epsilon} \geq \tau_{G}
+#'    \quad\text{versus}\quad
+#'    \tilde{H}_{a}: q_{1 - \epsilon} < \tau_{G},
+#' }
+#' using the smoothed Grenander estimator, \eqn{\hat{f}_{nh}^{SG}}
+#' with undersmoothing.
+#'
+#' @param y A numeric vector of the observed survival times, \eqn{Y_i}.
+#' @param delta A numeric vector of the censoring indicators, \eqn{\Delta_i}.
+#' @param n.boot An integer of number of bootstrap samples.
+#' @param tau.c A numeric of the end of the study time.
+#' \code{NULL} indicates the maximum observed survival time \code{max(y)} is used.
+#' @param skm.bw.multi A numeric of scaling to the bandwidth, \eqn{h_0}, for smoothing
+#' the density estimator for generating bootstrap samples.
+#'
+#' @return A list containing the results including the estimate
+#' \eqn{\hat{f}_{nh}^{SG}(Y_{(n)})} and
+#' the bootstrap samples \eqn{\hat{f}_{nh}^{SG^\ast}(Y_{(n)}^\ast)}.
+#' @importFrom fdrtool gcmlcm
+#' @importFrom survival survfit Surv
+#' @importFrom stats integrate
+#' @keywords internal
+smooth.grenander.test.undersmooth <- function(y, delta, n.boot = 1000L, tau.c = NULL, skm.bw.multi = 1.0) {
+  if (is.null(tau.c)) {
+    # Estimate tau.c by max{y}
+    tau.c <- max(y)
+  }
+  n <- length(y)
+
+  # KME
+  km.fit <- survfit(Surv(y, delta) ~ 1)
+
+  # Cure fraction from the KME
+  p.hat <- min(km.fit$surv)
+
+  # Construct the LCM of 1 - KME
+  km.dist <- 1 - km.fit$surv
+  km.times <- km.fit$time
+
+  gcmlcm.fit <- gcmlcm(c(0, km.times), c(0, km.dist), type = 'lcm')
+
+
+  gren.times <- gcmlcm.fit$x.knots
+  gren.val <- c(gcmlcm.fit$slope.knots,
+                gcmlcm.fit$slope.knots[length(gcmlcm.fit$slope.knots)])
+
+  # Grenander estimator
+  gren.fit <- function(u) f.hat(u, gren.times, gren.val)
+
+  # Bandwidth for smoothing
+  bw <- min(tau.c*(n^(-7/30)), tau.c / 2)
+  # Smoothed Grenander estimator with boundary correction
+  grid.size <- 100L
+  sg <- boundary.smoother(seq(0, tau.c, length = grid.size),
+                          jumptimes = gcmlcm.fit$x.knots,
+                          jumpheights = gcmlcm.fit$slope.knots,
+                          bandwidth = bw, a = 0, b = tau.c)
+
+  sg.tau.c <- sg[grid.size]
+
+  # Smooth KME
+  bw0 <- min(skm.bw.multi*tau.c*(n^(-1/9)),tau.c/2)
+  x.grid <- seq(0, tau.c, length = 5000L)
+  f.tilde.x.grid <- boundary.smoother(
+    x.grid,
+    jumptimes = gcmlcm.fit$x.knots,
+    jumpheights = gcmlcm.fit$slope.knots,
+    bandwidth = bw0, a = 0, b = tau.c)
+  f.tilde.up.shift <- max(-min(f.tilde.x.grid), 0)
+  f.tilde.x.grid <- f.tilde.x.grid + f.tilde.up.shift
+  area.total <- integrate(function(xxx) boundary.smoother(
+    xxx,
+    jumptimes = gcmlcm.fit$x.knots,
+    jumpheights = gcmlcm.fit$slope.knots,
+    bandwidth = bw0, a = 0, b = tau.c) + f.tilde.up.shift,
+    0, tau.c, subdivisions = 1000L)$value
+  f.tilde.x.grid <- f.tilde.x.grid * (1 - p.hat) / area.total
+  f.star.tau.c <- f.tilde.x.grid[length(f.tilde.x.grid)]
+  f.star.tau.c <- max(0, f.star.tau.c)
+
+  # Reverse KME for estimating the censoring distribution
+  rev.km <- estimate.km(y, 1L - delta)
+
+  b.res <- lapply(seq(n.boot), function(j) {
+    if (j %% 100 == 0) cat("\r", sprintf("Bootstrap iteration: %d / %d   ", j, n.boot))
+    seed.out <- .Random.seed
+    boot.res <- smooth.grenander.bootstrap.undersmooth(rev.km, gcmlcm.fit, tau.c, n, skm.bw.multi)
+    return(list("bs.iter" = j, "bs.seed" = seed.out,
+                "sg.star.tau.c" = boot.res$sg.star.tau.c,
+                "p.hat.star" = boot.res$p.hat.star,
+                "tau.c.star" = boot.res$tau.c.star))
+  })
+
+  sg.tau.c.star <- sapply(b.res, function(b) {
+    return(b$sg.star.tau.c)
+  })
+  p.hat.star <- sapply(b.res, function(b) {
+    return(b$p.hat.star)
+  })
+  tau.c.star <- sapply(b.res, function(b) {
+    return(b$tau.c.star)
+  })
+
+  output.list <- list("sg.tau.c.fit" = sg.tau.c,
+                      "sg.tau.c.star" = sg.tau.c.star,
+                      "p.hat" = p.hat, "p.hat.star" = p.hat.star,
+                      "km.fit" = km.fit, "rev.km.fit" = rev.km,
+                      "skm.df" = NULL, "f.star.tau.c" = f.star.tau.c,
+                      "boot.res" = b.res, "gren.fit" = gren.fit,
+                      "n" = n,
+                      "tau.c" = tau.c, "tau.c.star" = tau.c.star,
+                      "gcmlcm.fit" = gcmlcm.fit)
+  return(output.list)
+}

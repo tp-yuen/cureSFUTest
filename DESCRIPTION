@@ -1,16 +1,16 @@
 Package: cureSFUTest
 Type: Package
 Title: Testing for sufficient follow-up in survival data with a cure fraction using shape constrained density estimator
-Version: 1.0.0
-Date: 2024-03-25
-Authors@R: c(person(given = "Eni", family = "Musta", role = c("aut")),
-            person(given = "Tsz Pang", family = "Yuen", 
-                   email = "patrick.tp.yuen@gmail.com",
-                   role = c("aut", "cre")))
+Version: 2.0.0
+Date: 2025-05-19
+Authors@R: c(person(given = "Eni", family = "Musta", role = c("aut")), 
+             person(given = "Ingrid", family = "Van Keilegom", role = c("aut")),
+             person(given = "Tsz Pang", family = "Yuen", 
+                    email = "patrick.tp.yuen@gmail.com", role = c("aut", "cre")))
 Depends: R (>= 4.3.0)
 Imports: stats, survival, fdrtool
 Description: Testing for sufficient follow-up in survival data with a cure fraction using shape constrained density estimator.
 License: GPL (>= 2)
 Encoding: UTF-8
 LazyData: false
-RoxygenNote: 7.3.1
+RoxygenNote: 7.3.2
